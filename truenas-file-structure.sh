@@ -8,8 +8,7 @@ PRIVATE_IP=$(hostname -I | awk '{print $1}')
 CIDR_NETWORK="${PRIVATE_IP%.*}.0/24"
 
 # Define datasets and directories
-CONFIG_DATASETS=("prowlarr" "radarr" "sonarr" "emby" "recyclarr" "bazarr" "jellyseerr" "qbittorrent" "dozzle")
-TDARR_SUBDIRS=("server" "logs" "transcode_cache")
+CONFIG_DATASETS=("prowlarr" "radarr" "sonarr" "jellyseerr" "recyclarr" "Emby" "qbittorrent")
 MEDIA_SUBDIRECTORIES=("movies" "tv" "downloads")
 DOCKER_COMPOSE_PATH="/mnt/$POOLNAME/docker"
 QBITTORRENT_WIREGUARD_DIR="/mnt/$POOLNAME/configs/qbittorrent/wireguard"
@@ -68,16 +67,6 @@ create_dataset "media"
 for subdir in "${MEDIA_SUBDIRECTORIES[@]}"; do
     create_directory "/mnt/$POOLNAME/media/$subdir"
 done
-
-# Ensure Tdarr subdirectories exist (only if tdarr dataset is properly mounted)
-TDARR_MOUNTPOINT="/mnt/$POOLNAME/configs/tdarr"
-if mountpoint -q "$TDARR_MOUNTPOINT"; then
-    for subdir in "${TDARR_SUBDIRS[@]}"; do
-        create_directory "$TDARR_MOUNTPOINT/$subdir"
-    done
-else
-    echo "⚠️ Skipping tdarr subdirectory creation; dataset is not mounted."
-fi
 
 # Ensure Docker Compose directory exists
 create_directory "$DOCKER_COMPOSE_PATH"
@@ -154,22 +143,6 @@ services:
     volumes:
       - /mnt/$POOLNAME/configs/jellyseerr:/app/config
       
-  flaresolverr:
-    image: 21hsmw/flaresolverr:nodriver
-    container_name: flaresolverr
-    environment:
-      - LOG_LEVEL=info
-      - LOG_HTML=false
-      - CAPTCHA_SOLVER=none
-      - TZ=America/New_York
-    networks:
-      - media_network
-    ports:
-      - 8191:8191
-    restart: unless-stopped
-	logging:
-          driver: json-file
-
   recyclarr:
     image: ghcr.io/recyclarr/recyclarr
     user: 568:568
@@ -182,40 +155,34 @@ services:
     volumes:
       - /mnt/$POOLNAME/configs/recyclarr:/config
 
-  bazarr:
-    image: linuxserver/bazarr
-    container_name: bazarr
-    restart: unless-stopped
-    ports:
-      - 6767:6767
-    environment:
-      - PUID=568
-      - PGID=568
-      - TZ=America/New_York
+    devices:
+      - /dev/dri:/dev/dri
+  #  deploy:
+  #    resources:
+  #      reservations:
+  #        devices:
+  #        - driver: nvidia
+  #          count: all
+  #          capabilities: [gpu]
     networks:
       - media_network
-    volumes:
-      - /mnt/$POOLNAME/configs/bazarr:/config
-      - /mnt/$POOLNAME/media:/media
 
-  emby:
-    image: lscr.io/linuxserver/emby:latest
+    emby:
     container_name: emby
-    runtime: nvidia # Expose NVIDIA GPUs
-    network_mode: host # Enable DLNA and Wake-on-Lan
+    image: lscr.io/linuxserver/emby
     environment:
       - PUID=568
       - PGID=568
-      - NVIDIA_VISIBLE_DEVICES=all
       - TZ=America/New_York
+    ports:
+      - 8096:8096
+      - 8920:8920 # Optional: for HTTPS
     volumes:
       - /mnt/$POOLNAME/configs/emby:/config
       - /mnt/$POOLNAME/media:/media
-    ports:
-      - 8096:8096 # HTTP port
-      - 8920:8920 # HTTPS port
-
     restart: unless-stopped
+    networks:
+      - media_network
 
   qbittorrent:
     container_name: qbittorrent
@@ -249,34 +216,6 @@ services:
     volumes:
       - /mnt/$POOLNAME/configs/qbittorrent:/config
       - /mnt/$POOLNAME/media:/media
-
-  dozzle:
-    image: amir20/dozzle
-    container_name: dozzle
-    restart: unless-stopped
-    ports:
-      - '8888:8080'
-    networks:
-      - media_network
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - /mnt/$POOLNAME/configs/dozzle:/data
-
-  watchtower:
-    container_name: watchtower
-    environment:
-      - TZ=America/New_York
-      - WATCHTOWER_CLEANUP=true
-      - WATCHTOWER_NOTIFICATIONS_HOSTNAME=TrueNAS
-      - WATCHTOWER_INCLUDE_STOPPED=true
-      - WATCHTOWER_DISABLE_CONTAINERS=ix*
-      - WATCHTOWER_NO_STARTUP_MESSAGE=true
-      - WATCHTOWER_SCHEDULE=0 0 3 * * *
-    image: containrrr/watchtower
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-
       
 EOF
 
